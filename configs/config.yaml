@@ -1,0 +1,13 @@
+server:
+  addr: ":8080"
+
+model:
+  name: "yolov8"
+  task: "detect"
+  path: "./models/yolov8n.onnx"
+  input_size: 640
+  num_preds: 8400
+  num_classes: 80
+  output_layout: "channels_first"
+  conf_threshold: 0.25
+  iou_threshold: 0.45
