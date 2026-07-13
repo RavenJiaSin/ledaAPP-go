@@ -188,14 +188,52 @@ JSON Response
 - 系統目前處於：
   > 單張圖片推論可用，但尚未進入 streaming pipeline 架構
 
----
+### 2026-07-13 
 
-## 八、系統總結
+#### 完成項目
 
-目前系統已完成：
+- 新增 `internal/app` 層，拆分原本 `cmd/server/main.go` 的初始化責任：
+  - Runtime 建立
+  - Model 載入
+  - Camera 初始化
+  - Pipeline 註冊與綁定
 
-> 「YOLOv8 單張圖片推論引擎」
+- 修改 `configs/config.yaml`：
+  - 支援 camera 設定列表
+  - 由設定檔管理 camera source、model binding、stream interval
 
-下一階段目標為：
+- 修正 ONNX Runtime 啟動問題：
+  - 啟用 `onnxruntime` build tag
+  - 確認新版 ONNX Runtime 1.26 DLL 正確載入
+  - 排除系統 PATH 中舊版 ONNX Runtime 1.17/1.16 DLL 衝突
 
-> 「從 request-based inference → 轉換為 streaming inference system」
+- 完成實際服務驗證：
+  - `/health` 正常回應
+  - `/api/camera/check?name=cam0` 回傳 camera alive
+  - `/api/infer_od/live_result?name=cam0` 成功取得 YOLO 推論結果
+
+#### 測試結果
+
+已確認流程：
+
+Camera  
+→ Stream Worker  
+→ YOLO Pipeline  
+→ ONNX Runtime  
+→ Store  
+→ API Response
+
+可正常運作。
+
+#### 尚未完成
+
+- `/api/camera/frame` 與 `/api/camera/live` 尚未確認影像輸出
+- `/api/start_live_infer_od` PowerShell curl 測試格式需修正
+- 尚未進行真實長時間 camera + ONNX 壓力測試
+
+#### 下一步
+
+1. 修正並驗證 camera frame/live MJPEG API
+2. 完成 API integration test（包含 camera、stream、inference endpoint）
+3. 進行真實 camera + YOLO ONNX 長時間運行測試
+4. 整理 deployment 流程（DLL、model、config、binary 打包）
