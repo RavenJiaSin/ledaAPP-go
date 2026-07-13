@@ -2,10 +2,21 @@ package store
 
 import (
 	"sync"
+	"time"
 
 	"yolo-go-inference/internal/pipeline"
 	"yolo-go-inference/pkg/types"
 )
+
+// -----------------------------
+// Detection Result (NEW)
+// -----------------------------
+
+type DetectionResult struct {
+	CameraName string
+	Timestamp  time.Time
+	Result     types.InferenceResult
+}
 
 // -----------------------------
 // Pipeline Registry
@@ -20,8 +31,8 @@ type PipelineStore struct {
 	// cameraName → modelName
 	cameraBind map[string]string
 
-	// modelName → last result
-	lastResult map[string]types.InferenceResult
+	// cameraName → last result  ❗改這裡（原本是 modelName）
+	lastResult map[string]DetectionResult
 }
 
 // 建立 store
@@ -29,7 +40,7 @@ func NewPipelineStore() *PipelineStore {
 	return &PipelineStore{
 		pipelines:  make(map[string]*pipeline.Pipeline),
 		cameraBind: make(map[string]string),
-		lastResult: make(map[string]types.InferenceResult),
+		lastResult: make(map[string]DetectionResult),
 	}
 }
 
@@ -77,21 +88,27 @@ func (s *PipelineStore) GetModelByCamera(cameraName string) (string, bool) {
 
 //
 // -----------------------------
-// inference result cache
+// inference result cache (UPDATED)
 // -----------------------------
 
-func (s *PipelineStore) SetResult(modelName string, result types.InferenceResult) {
+// ❗ streaming worker 用
+func (s *PipelineStore) SetCameraResult(cameraName string, result types.InferenceResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.lastResult[modelName] = result
+	s.lastResult[cameraName] = DetectionResult{
+		CameraName: cameraName,
+		Timestamp:  time.Now(),
+		Result:     result,
+	}
 }
 
-func (s *PipelineStore) GetResult(modelName string) (types.InferenceResult, bool) {
+// ❗ API 用
+func (s *PipelineStore) GetCameraResult(cameraName string) (DetectionResult, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	r, ok := s.lastResult[modelName]
+	r, ok := s.lastResult[cameraName]
 	return r, ok
 }
 

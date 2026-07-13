@@ -11,6 +11,8 @@ import (
 // Camera Manager
 // -----------------------------
 
+
+
 type CameraManager struct {
 	mu sync.RWMutex
 
@@ -104,14 +106,17 @@ func (m *CameraManager) captureLoop(name string, cap *gocv.VideoCapture) {
 			continue
 		}
 
+		// ✅ clone 一份給 store（避免 race）
+		clone := mat.Clone()
+		mat.Close()
+
 		m.mu.Lock()
 
-		// release old frame
 		if old, ok := m.lastFrames[name]; ok {
 			old.Close()
 		}
 
-		m.lastFrames[name] = mat
+		m.lastFrames[name] = clone
 
 		m.mu.Unlock()
 	}
@@ -178,4 +183,18 @@ func (m *CameraManager) CloseAll() {
 	}
 
 	m.running = make(map[string]bool)
+}
+
+// InjectFrame injects a gocv.Mat into the camera manager for testing purposes.
+func (m *CameraManager) InjectFrame(cameraName string, mat gocv.Mat) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	clone := mat.Clone()
+
+	if old, ok := m.lastFrames[cameraName]; ok {
+		old.Close()
+	}
+
+	m.lastFrames[cameraName] = clone
 }

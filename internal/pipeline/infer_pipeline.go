@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"image"
 
 	"yolo-go-inference/internal/postprocess"
@@ -12,14 +13,23 @@ type Runner interface {
 	Run(input []float32, shape []int64) ([]float32, error)
 }
 
+type ResultWriter interface {
+	SetCameraResult(cameraName string, result types.InferenceResult)
+}
+
 type Pipeline struct {
 	Session       Runner
 	InputSize     int
-	NumPreds int
+	NumPreds      int
 	NumClasses    int
-	OutputLayout postprocess.YOLOv8Layout
+	OutputLayout  postprocess.YOLOv8Layout
 	ConfThreshold float32
 	IouThreshold  float32
+}
+
+type Frame struct {
+	CameraName string
+	Image      image.Image
 }
 
 // 建立 pipeline
@@ -90,4 +100,31 @@ func (p *Pipeline) Infer(img image.Image) (types.InferenceResult, error) {
 		Detections: dets,
 		Count:      len(dets),
 	}, nil
+}
+
+// 新增 Streaming Runner
+func (p *Pipeline) RunStream(
+	ctx context.Context,
+	frameCh <-chan Frame,
+	store ResultWriter,
+) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case frame, ok := <-frameCh:
+			if !ok {
+				return
+			}
+
+			result, err := p.Infer(frame.Image)
+			if err != nil {
+				continue
+			}
+
+			// 正確：用 frame.CameraName
+			store.SetCameraResult(frame.CameraName, result)
+		}
+	}
 }

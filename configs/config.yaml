@@ -1,6 +1,8 @@
 server:
   addr: ":8080"
 
+
+# models:
 model:
   name: "yolov8"
   task: "detect"
@@ -11,3 +13,11 @@ model:
   output_layout: "channels_first"
   conf_threshold: 0.25
   iou_threshold: 0.45
+
+
+cameras:
+
+  - name: cam0
+    source: 0
+    model: yolov8
+    interval_ms: 33
