@@ -357,3 +357,260 @@ Inference API
 2. 建立 task / pipeline registry
 3. 抽象化 inference result structure
 4. 完成 Docker 化部署流程
+
+### 2026-07-17
+
+#### 完成項目
+
+- 完成 Runtime Pipeline Binding 架構：
+  - Runtime 負責管理 Pipeline 註冊與 Camera 綁定
+  - PipelineStore 增加：
+    - modelName → Pipeline registry
+    - cameraName → modelName binding
+    - cameraName → latest inference result cache
+
+架構：
+```
+Runtime
+
+↓
+
+PipelineStore
+
+├── Pipeline Registry
+│ model → pipeline
+│
+├── Camera Binding
+│ camera → model
+│
+└── Result Cache
+camera → inference result
+```
+
+- 完成 Stream Manager 與 Pipeline Binding 整合：
+```
+Camera
+
+↓
+
+StreamManager
+
+↓
+
+Get camera binding
+
+↓
+
+Get Pipeline
+
+↓
+
+YOLO Inference
+
+↓
+
+Store Result
+
+↓
+
+API Query
+```
+
+- 修正 Camera Lifecycle 資源釋放問題：
+  - 增加 capture worker 管理
+  - 使用 per-camera WaitGroup 等待 capture goroutine 結束
+  - 修正 VideoCapture 關閉時 device 未釋放問題
+  - 改善 gocv Mat 資源管理
+
+Camera lifecycle：
+```
+camera/open
+
+↓
+
+VideoCapture open
+
+↓
+
+captureLoop start
+
+↓
+
+camera/close
+
+↓
+
+stop captureLoop
+
+↓
+
+release VideoCapture
+
+↓
+
+release Mat
+```
+
+
+- 修正 Camera API 測試流程：
+  - 支援 video file 作為 camera source
+  - 使用 test.mp4 模擬 camera input
+  - 驗證完整 inference flow
+
+測試流程：
+```
+test.mp4
+
+↓
+
+CameraManager
+
+↓
+
+StreamManager
+
+↓
+
+YOLOv8 Pipeline
+
+↓
+
+Result Store
+
+↓
+
+Inference API
+```
+
+
+- 新增 API integration test：
+
+測試內容：
+
+- camera/open
+- camera/check
+- camera/frame
+- inference/start
+- inference result generation
+- inference/live_result
+- inference/stop
+- camera/close
+
+- 完成實際 Build 測試：
+
+#### 測試結果
+
+確認完整 Runtime Flow：
+```
+Camera API
+
+↓
+
+CameraManager
+
+↓
+
+StreamManager
+
+↓
+
+Pipeline Binding
+
+↓
+
+YOLOv8 Pipeline
+
+↓
+
+PipelineStore
+
+↓
+
+Inference API
+```
+
+可正常運作。
+
+
+實際 API 測試：
+```
+camera/open
+✓
+
+inference/start
+✓
+
+infer_od/live_result
+✓
+
+inference/stop
+✓
+
+camera/close
+✓
+```
+
+
+確認：
+
+- Camera 與 Inference lifecycle 可獨立控制
+- Video source 可取代實體 camera 進行測試
+- Pipeline binding 可正常將 camera 導向指定模型
+- Result cache 可提供即時 inference 結果
+
+
+#### 尚未完成
+
+- Pipeline interface 尚未抽象化
+  - 目前 StreamManager 仍直接依賴：
+    ```
+    *pipeline.Pipeline
+    ```
+  - 尚無法直接替換不同 inference task
+
+
+- Inference Result 結構仍偏向 Object Detection：
+  - Detection
+  - Bounding Box
+  - Class ID
+
+
+尚未支援：
+```
+Classification
+
+Segmentation
+
+Pose Estimation
+
+Tracking
+```
+- Live Streaming API 尚未完整驗證：
+  - camera/live 僅完成 route
+  - 尚未確認長時間串流穩定性
+  - 尚未整合前端或 WebSocket/MJPEG output
+
+
+- Deployment 尚未開始：
+  - Docker image
+  - runtime config
+  - model volume management
+
+#### 下一步
+
+1. Pipeline Interface 化
+   - 抽象 inference pipeline
+   - 支援 OD / CLS / SEG 等不同任務
+
+
+2. 建立 Pipeline Registry
+   - 統一管理不同模型 pipeline
+
+
+3. 泛化 Inference Result
+   - 支援不同任務輸出格式
+
+
+4. 完成 Pipeline 抽象後，再進行：
+   - camera/live 串流輸出
+   - 前端即時畫面整合
