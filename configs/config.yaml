@@ -2,22 +2,26 @@ server:
   addr: ":8080"
 
 
-# models:
-model:
-  name: "yolov8"
-  task: "detect"
-  path: "./models/yolov8n.onnx"
-  input_size: 640
-  num_preds: 8400
-  num_classes: 80
-  output_layout: "channels_first"
-  conf_threshold: 0.25
-  iou_threshold: 0.45
+models:
+
+  - name: yolov8
+    task: detect
+    path: ./models/yolov8n.onnx
+    input_size: 640
+    num_preds: 8400
+    num_classes: 80
+    output_layout: channels_first
+    conf_threshold: 0.25
+    iou_threshold: 0.45
+
+
+  - name: yolov8-seg
+    task: segment
+    path: ./models/yolov8n-seg.onnx
+    input_size: 640
 
 
 cameras:
 
   - name: cam0
     source: 0
-    model: yolov8
-    interval_ms: 33

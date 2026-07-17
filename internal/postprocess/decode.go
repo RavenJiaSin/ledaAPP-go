@@ -1,3 +1,4 @@
+// internal\postprocess\decode.go
 package postprocess
 
 import (
@@ -73,6 +74,15 @@ func DecodeYOLOv8(
 		x2 = float32((float64(x2) - padX) / scale)
 		y2 = float32((float64(y2) - padY) / scale)
 
+		className := ""
+
+		if classID >= 0 &&
+			classID < len(COCOClasses) {
+
+			className = COCOClasses[classID]
+
+		}
+
 		detections = append(detections, types.Detection{
 			X1:         x1,
 			Y1:         y1,
@@ -80,6 +90,7 @@ func DecodeYOLOv8(
 			Y2:         y2,
 			Confidence: maxProb,
 			ClassID:    classID,
+			ClassName:  className,
 		})
 	}
 

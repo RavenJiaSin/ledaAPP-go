@@ -3,6 +3,8 @@ package stream
 import (
 	"testing"
 	"time"
+
+	"yolo-go-inference/internal/pipeline"
 )
 
 
@@ -79,22 +81,27 @@ func TestRuntimePipelineBinding(t *testing.T){
 
 	r := NewRuntime()
 
-
 	defer r.Stop()
 
 
-	if r.Store == nil {
-		t.Fatal("store missing")
-	}
+	r.RegisterPipeline(
+		"yolov8",
+		&pipeline.Pipeline{},
+	)
 
 
-	// 目前只測 API 存在
-	// 真正 pipeline 測試在 integration test
-
-	r.BindCamera(
+	err := r.BindCamera(
 		"cam0",
 		"yolov8",
 	)
+
+
+	if err != nil {
+		t.Fatalf(
+			"bind camera failed: %v",
+			err,
+		)
+	}
 
 
 	model, ok :=
@@ -104,11 +111,9 @@ func TestRuntimePipelineBinding(t *testing.T){
 
 
 	if !ok {
-
 		t.Fatal(
 			"camera binding missing",
 		)
-
 	}
 
 
@@ -118,7 +123,6 @@ func TestRuntimePipelineBinding(t *testing.T){
 			"unexpected model %s",
 			model,
 		)
-
 	}
 
 }

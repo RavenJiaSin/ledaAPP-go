@@ -2,129 +2,174 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
-	"encoding/json"
 
 	"github.com/gin-gonic/gin"
 
 	"yolo-go-inference/internal/stream"
-	"yolo-go-inference/internal/store"
 	"yolo-go-inference/pkg/types"
+	"yolo-go-inference/internal/store"
+	"yolo-go-inference/internal/pipeline"
 )
 
 
-// -----------------------------
-// Fake StreamMgr
-// -----------------------------
 
+// --------------------------------------------------
+// Fake Stream Controller
+// --------------------------------------------------
 
-type fakeStreamMgr struct {
-	store *store.PipelineStore
+type integrationFakeStream struct {
+
+	store interface {
+		SetCameraResult(
+			string,
+			types.InferenceResult,
+		)
+	}
+
 	running map[string]bool
 }
 
 
-func (f *fakeStreamMgr) StartStream(
+
+func (f *integrationFakeStream) StartStream(
 	name string,
 	cfg stream.StreamConfig,
 ) error {
 
-	go func() {
+
+	f.running[name] = true
+
+
+	go func(){
 
 		time.Sleep(
 			50*time.Millisecond,
 		)
 
-		f.running[name] = true
 
 		f.store.SetCameraResult(
 			name,
 			types.InferenceResult{
-				Detections: []types.Detection{
-					{
-						ClassName:"person",
-						Confidence:0.8,
+
+				Detections:
+					[]types.Detection{
+
+						{
+							ClassID:0,
+
+							ClassName:"person",
+
+							Confidence:0.92,
+
+							X1:100,
+
+							Y1:100,
+
+							X2:300,
+
+							Y2:400,
+						},
+
 					},
-				},
+
 			},
 		)
 
+
 	}()
+
 
 	return nil
 }
 
 
 
-func (f *fakeStreamMgr) StopStream(name string){
-	delete(f.running, name)
+func (f *integrationFakeStream) StopStream(
+	name string,
+){
+
+	delete(
+		f.running,
+		name,
+	)
+
 }
 
 
-func (f *fakeStreamMgr) StopAll(){
+
+func (f *integrationFakeStream) StopAll(){
+
 }
 
 
 
-// -----------------------------
-// Test4
-// Camera
+// --------------------------------------------------
+// Full inference flow
+//
+// API
 //  |
 // Stream
 //  |
 // Store
 //  |
-// API
-// -----------------------------
+// Query Result
+// --------------------------------------------------
 
-func TestFullFlow(t *testing.T) {
+func TestServerInferenceFlow(
+	t *testing.T,
+){
 
-	gin.SetMode(gin.TestMode)
-
-
-	// -----------------
-	// store
-	// -----------------
-
-	pipelineStore := store.NewPipelineStore()
+	gin.SetMode(
+		gin.TestMode,
+	)
 
 
 
-	// -----------------
-	// fake stream
-	// -----------------
+	// -------------------------
+	// create server
+	// -------------------------
 
-	streamMgr := &fakeStreamMgr{
-		store: pipelineStore,
-		running: make(map[string]bool),
-	}
+	srv :=
+		setupTestServer()
+
+	srv.Runtime.RegisterPipeline(
+		"yolov8",
+		&pipeline.Pipeline{},
+	)
+
+	// -------------------------
+	// replace stream manager
+	// -------------------------
+
+	fake :=
+		&integrationFakeStream{
+
+			store:
+				srv.Runtime.Store,
+
+			running:
+				make(map[string]bool),
+		}
 
 
 
-	// -----------------
-	// server
-	// -----------------
-
-	runtime := stream.NewRuntime()
-
-	runtime.Store = pipelineStore
-	runtime.Stream = streamMgr
+	srv.Runtime.Stream =
+		fake
 
 
-	srv := &Server{
-		Runtime: runtime,
-	}
 
-
-	srv.Router = gin.New()
-
+	// -------------------------
+	// routes
+	// -------------------------
 
 	srv.Router.POST(
-		"/api/start_live_infer_od",
-		srv.StartLiveInferOD,
+		"/api/inference/start",
+		srv.StartInference,
 	)
 
 
@@ -135,23 +180,26 @@ func TestFullFlow(t *testing.T) {
 
 
 
-	// -----------------
-	// 1. start stream
-	// -----------------
+	// -------------------------
+	// 1. start inference
+	// -------------------------
 
-	body := []byte(`
-	{
-		"cam_name":"cam0",
-		"interval":33
-	}
-	`)
+	body :=
+		[]byte(`
+		{
+			"cam_name":"cam0",
+			"interval":33
+		}
+		`)
 
 
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/api/start_live_infer_od",
-		bytes.NewBuffer(body),
-	)
+
+	req :=
+		httptest.NewRequest(
+			http.MethodPost,
+			"/api/inference/start",
+			bytes.NewBuffer(body),
+		)
 
 
 	req.Header.Set(
@@ -160,7 +208,63 @@ func TestFullFlow(t *testing.T) {
 	)
 
 
-	rec := httptest.NewRecorder()
+
+	rec :=
+		httptest.NewRecorder()
+
+
+
+	srv.Router.ServeHTTP(
+		rec,
+		req,
+	)
+
+
+
+	var resp APIResponse
+
+	json.Unmarshal(
+		rec.Body.Bytes(),
+		&resp,
+	)
+
+
+	if resp.Code != 0 {
+		t.Fatalf(
+			"start inference failed: %s",
+			resp.Msg,
+		)
+	}
+
+
+
+	// -------------------------
+	// 2. wait inference result
+	// -------------------------
+
+	waitInferenceResult(
+		t,
+		srv.Runtime.Store,
+		"cam0",
+	)
+
+
+
+	// -------------------------
+	// 3. query result API
+	// -------------------------
+
+	req =
+		httptest.NewRequest(
+			http.MethodGet,
+			"/api/infer_od/live_result?name=cam0",
+			nil,
+		)
+
+
+	rec =
+		httptest.NewRecorder()
+
 
 
 	srv.Router.ServeHTTP(
@@ -173,38 +277,106 @@ func TestFullFlow(t *testing.T) {
 	if rec.Code != http.StatusOK {
 
 		t.Fatalf(
-			"start stream failed: code=%d body=%s",
+			"unexpected status: %d",
 			rec.Code,
-			rec.Body.String(),
 		)
+
 	}
 
 
 
-	// -----------------
-	// 2. wait inference
-	// -----------------
+	var response APIResponse
 
-	waitResult(
-		t,
-		pipelineStore,
-		"cam0",
+
+	err :=
+		json.Unmarshal(
+			rec.Body.Bytes(),
+			&response,
+		)
+
+
+	if err != nil {
+
+		t.Fatalf(
+			"invalid json: %v",
+			err,
+		)
+
+	}
+
+
+
+	result,ok :=
+		response.Result.(map[string]interface{})
+
+
+	if !ok {
+
+		t.Fatalf(
+			"invalid result format",
+		)
+
+	}
+
+
+
+	last,ok :=
+		result["last_result"].([]interface{})
+
+
+	if !ok {
+
+		t.Fatalf(
+			"missing last_result",
+		)
+
+	}
+
+
+
+	if len(last)==0 {
+
+		t.Fatal(
+			"empty detection result",
+		)
+
+	}
+
+}
+
+
+
+// --------------------------------------------------
+// query non-existing camera
+// --------------------------------------------------
+
+func TestInferODLiveResultNotFound(
+	t *testing.T,
+){
+
+	srv :=
+		setupTestServer()
+
+
+
+	srv.Router.GET(
+		"/api/infer_od/live_result",
+		srv.InferODLiveResult,
 	)
 
 
 
-	// -----------------
-	// 3. query API
-	// -----------------
-
-	req = httptest.NewRequest(
-		http.MethodGet,
-		"/api/infer_od/live_result?name=cam0",
-		nil,
-	)
+	req :=
+		httptest.NewRequest(
+			http.MethodGet,
+			"/api/infer_od/live_result?name=unknown",
+			nil,
+		)
 
 
-	rec = httptest.NewRecorder()
+	rec :=
+		httptest.NewRecorder()
+
 
 
 	srv.Router.ServeHTTP(
@@ -223,79 +395,28 @@ func TestFullFlow(t *testing.T) {
 
 	}
 
-	var resp APIResponse
-
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("invalid json: %v", err)
-	}
-
-	result, ok := resp.Result.(map[string]interface{})
-	if !ok {
-		t.Fatalf("unexpected result format")
-	}
-
-	rawLast, ok := result["last_result"]
-	if !ok {
-		t.Fatalf("missing last_result field")
-	}
-
-	last, ok := rawLast.([]interface{})
-	if !ok {
-		t.Fatalf("last_result is not array")
-	}
-
-	if len(last) == 0 {
-		t.Fatal("no detections")
-	}
-
-	// -----------------
-	// 4. query non-exist camera
-	// -----------------
-
-	req = httptest.NewRequest(
-		http.MethodGet,
-		"/api/infer_od/live_result?name=not_exist",
-		nil,
-	)
-
-	rec = httptest.NewRecorder()
-
-	srv.Router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 got %d", rec.Code)
-	}
-
-	// optional: 驗證 response 是空結果
-	var resp2 APIResponse
-
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp2); err != nil {
-		t.Fatalf("invalid json: %v", err)
-	}
-
 }
 
 
-// -----------------------------
-// wait store result
-// -----------------------------
 
-func waitResult(
+// --------------------------------------------------
+// helper
+// --------------------------------------------------
+
+func waitInferenceResult(
 	t *testing.T,
 	store *store.PipelineStore,
 	camera string,
-){
+) {
 
-	timeout :=
-		time.After(
-			2*time.Second,
-		)
+	timeout := time.After(
+		2 * time.Second,
+	)
 
 
 	for {
 
 		select {
-
 
 		case <-timeout:
 
@@ -307,7 +428,9 @@ func waitResult(
 		default:
 
 			_, ok :=
-				store.GetCameraResult(camera)
+				store.GetCameraResult(
+					camera,
+				)
 
 
 			if ok {
@@ -316,32 +439,8 @@ func waitResult(
 
 
 			time.Sleep(
-				20*time.Millisecond,
+				20 * time.Millisecond,
 			)
-
 		}
 	}
-
-}
-
-
-
-// -----------------------------
-// contains
-// -----------------------------
-
-func contains(
-	s string,
-	sub string,
-) bool {
-
-	for i:=0; i+len(sub)<=len(s); i++ {
-
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-
-	}
-
-	return false
 }

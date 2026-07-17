@@ -51,22 +51,12 @@ func New(cfg config.Config) (*App,error){
 
 func (a *App) init() error {
 
-
-	if err:=loadModels(
+	if err := loadModels(
 		a.Runtime,
 		a.Config,
-	); err!=nil{
+	); err != nil {
 		return err
 	}
-
-
-	if err:=initCameras(
-		a.Runtime,
-		a.Config,
-	);err!=nil{
-		return err
-	}
-
 
 	return nil
 }

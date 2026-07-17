@@ -1,0 +1,5 @@
+{
+    "cam_name": "cam0",
+    "model": "yolov8",
+    "interval": 33
+}

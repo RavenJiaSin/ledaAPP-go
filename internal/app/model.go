@@ -14,33 +14,40 @@ func loadModels(
 ) error {
 
 
-	session,err :=
-		inference.NewONNXSession(
-			cfg.Model.Path,
+	for _, modelCfg := range cfg.Models {
+
+
+		session, err :=
+			inference.NewONNXSession(
+				modelCfg.Path,
+			)
+
+
+		if err != nil {
+			return err
+		}
+
+
+
+		pipe :=
+			pipeline.NewPipeline(
+				session,
+				modelCfg.InputSize,
+				modelCfg.NumPreds,
+				modelCfg.NumClasses,
+				modelCfg.YOLOv8Layout(),
+				modelCfg.ConfThreshold,
+				modelCfg.IouThreshold,
+			)
+
+
+
+		runtime.RegisterPipeline(
+			modelCfg.Name,
+			pipe,
 		)
 
-
-	if err!=nil{
-		return err
 	}
-
-
-	pipe :=
-		pipeline.NewPipeline(
-			session,
-			cfg.Model.InputSize,
-			cfg.Model.NumPreds,
-			cfg.Model.NumClasses,
-			cfg.Model.YOLOv8Layout(),
-			cfg.Model.ConfThreshold,
-			cfg.Model.IouThreshold,
-		)
-
-
-	runtime.RegisterPipeline(
-		cfg.Model.Name,
-		pipe,
-	)
 
 
 	return nil

@@ -7,194 +7,543 @@ import (
 	"gocv.io/x/gocv"
 )
 
-// -----------------------------
-// Camera Manager
-// -----------------------------
-
-
 
 type CameraManager struct {
+
 	mu sync.RWMutex
 
-	// cameraName → VideoCapture
+
+	// cameraName -> VideoCapture
 	cameras map[string]*gocv.VideoCapture
 
-	// cameraName → last frame
+
+	// cameraName -> last frame
 	lastFrames map[string]gocv.Mat
 
-	// running state
+
+	// cameraName -> running
 	running map[string]bool
+
+
+	// cameraName -> capture worker waitgroup
+	workers map[string]*sync.WaitGroup
 }
 
-// 建立 manager
+
+
 func NewCameraManager() *CameraManager {
+
 	return &CameraManager{
-		cameras:    make(map[string]*gocv.VideoCapture),
-		lastFrames: make(map[string]gocv.Mat),
-		running:    make(map[string]bool),
+
+		cameras:
+			make(map[string]*gocv.VideoCapture),
+
+
+		lastFrames:
+			make(map[string]gocv.Mat),
+
+
+		running:
+			make(map[string]bool),
+
+
+		workers:
+			make(map[string]*sync.WaitGroup),
 	}
 }
 
-//
-// -----------------------------
-// Open camera
-// -----------------------------
-// source: 0 / RTSP / video path
-//
 
-func (m *CameraManager) Open(cameraName string, source interface{}) error {
+
+
+func (m *CameraManager) Open(
+	cameraName string,
+	source interface{},
+) error {
+
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.cameras[cameraName]; exists {
-		return errors.New("camera already opened")
+
+
+	if _, exists :=
+		m.cameras[cameraName];
+		exists {
+
+		return errors.New(
+			"camera already opened",
+		)
+
 	}
 
-	var cap *gocv.VideoCapture
-	var err error
+
+
+	var (
+		cap *gocv.VideoCapture
+		err error
+	)
+
+
 
 	switch v := source.(type) {
 
 	case int:
-		cap, err = gocv.OpenVideoCapture(v)
+
+		cap, err =
+			gocv.OpenVideoCapture(v)
+
 
 	case string:
-		cap, err = gocv.OpenVideoCapture(v)
+
+		if v == "0" {
+
+			cap, err =
+				gocv.OpenVideoCapture(0)
+
+		} else {
+
+			cap, err =
+				gocv.OpenVideoCapture(v)
+
+		}
+
 
 	default:
-		return errors.New("invalid camera source type")
+
+		return errors.New(
+			"invalid camera source type",
+		)
 	}
+
+
 
 	if err != nil {
 		return err
 	}
 
+
+
 	if !cap.IsOpened() {
-		return errors.New("failed to open camera")
+
+		return errors.New(
+			"failed to open camera",
+		)
 	}
 
-	m.cameras[cameraName] = cap
-	m.lastFrames[cameraName] = gocv.NewMat()
-	m.running[cameraName] = true
 
-	// start goroutine capture loop
-	go m.captureLoop(cameraName, cap)
+
+	m.cameras[cameraName] =
+		cap
+
+
+	m.lastFrames[cameraName] =
+		gocv.NewMat()
+
+
+	m.running[cameraName] =
+		true
+
+
+
+	wg := &sync.WaitGroup{}
+
+	wg.Add(1)
+
+	m.workers[cameraName] =
+		wg
+
+
+
+	go m.captureLoop(
+		cameraName,
+		cap,
+		wg,
+	)
+
+
 
 	return nil
 }
 
-//
-// -----------------------------
-// capture loop
-// -----------------------------
-// continuous frame update
-//
 
-func (m *CameraManager) captureLoop(name string, cap *gocv.VideoCapture) {
+
+
+
+func (m *CameraManager) captureLoop(
+	name string,
+	cap *gocv.VideoCapture,
+	wg *sync.WaitGroup,
+){
+
+	defer wg.Done()
+
+
+
 	for {
 
+
 		m.mu.RLock()
-		if !m.running[name] {
-			m.mu.RUnlock()
-			return
-		}
+
+		running :=
+			m.running[name]
+
 		m.mu.RUnlock()
 
-		mat := gocv.NewMat()
-		if ok := cap.Read(&mat); !ok || mat.Empty() {
+
+
+		if !running {
+			return
+		}
+
+
+
+		mat :=
+			gocv.NewMat()
+
+
+
+		ok :=
+			cap.Read(&mat)
+
+
+
+		if !ok {
+
 			mat.Close()
+
+			return
+		}
+
+
+
+		if mat.Empty(){
+
+			mat.Close()
+
 			continue
 		}
 
-		// ✅ clone 一份給 store（避免 race）
-		clone := mat.Clone()
+
+
+		clone :=
+			mat.Clone()
+
+
 		mat.Close()
+
+
 
 		m.mu.Lock()
 
-		if old, ok := m.lastFrames[name]; ok {
-			old.Close()
+
+
+		if !m.running[name] {
+
+			clone.Close()
+
+			m.mu.Unlock()
+
+			return
 		}
 
-		m.lastFrames[name] = clone
+
+
+		if old,ok :=
+			m.lastFrames[name];
+			ok {
+
+			old.Close()
+
+		}
+
+
+
+		m.lastFrames[name] =
+			clone
+
+
 
 		m.mu.Unlock()
+
 	}
+
 }
 
-//
-// -----------------------------
-// Get last frame
-// -----------------------------
-// non-blocking
-//
 
-func (m *CameraManager) LastFrame(cameraName string) (gocv.Mat, bool) {
+
+
+
+
+
+func (m *CameraManager) LastFrame(
+	cameraName string,
+) (gocv.Mat,bool){
+
+
 	m.mu.RLock()
+
 	defer m.mu.RUnlock()
 
-	frame, ok := m.lastFrames[cameraName]
-	if !ok || frame.Empty() {
-		return gocv.Mat{}, false
+
+
+	frame,ok :=
+		m.lastFrames[cameraName]
+
+
+	if !ok || frame.Empty(){
+
+		return gocv.Mat{},false
 	}
 
-	return frame.Clone(), true
+
+
+	return frame.Clone(),true
+
 }
 
-//
-// -----------------------------
-// Stop camera
-// -----------------------------
 
-func (m *CameraManager) Close(cameraName string) {
+
+
+
+
+
+
+func (m *CameraManager) Close(
+	cameraName string,
+){
+
+
+
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
-	if cap, ok := m.cameras[cameraName]; ok {
+
+
+	delete(
+		m.running,
+		cameraName,
+	)
+
+
+
+	cap,ok :=
+		m.cameras[cameraName]
+
+
+	wg :=
+		m.workers[cameraName]
+
+
+
+	delete(
+		m.cameras,
+		cameraName,
+	)
+
+
+	delete(
+		m.workers,
+		cameraName,
+	)
+
+
+
+	m.mu.Unlock()
+
+
+
+	if ok {
+
+		// 立即釋放 device
 		cap.Close()
-		delete(m.cameras, cameraName)
+
 	}
 
-	if frame, ok := m.lastFrames[cameraName]; ok {
-		frame.Close()
-		delete(m.lastFrames, cameraName)
+
+
+	if wg != nil {
+
+		wg.Wait()
+
 	}
 
-	delete(m.running, cameraName)
-}
 
-//
-// -----------------------------
-// Stop all
-// -----------------------------
 
-func (m *CameraManager) CloseAll() {
 	m.mu.Lock()
+
 	defer m.mu.Unlock()
 
-	for name, cap := range m.cameras {
+
+
+	if frame,ok :=
+		m.lastFrames[cameraName];
+		ok {
+
+
+		frame.Close()
+
+
+		delete(
+			m.lastFrames,
+			cameraName,
+		)
+
+	}
+
+}
+
+
+
+
+
+
+
+func (m *CameraManager) CloseAll(){
+
+
+	m.mu.Lock()
+
+
+
+	caps :=
+		make([]*gocv.VideoCapture,0)
+
+
+	for name,cap :=
+		range m.cameras {
+
+
+		caps =
+			append(
+				caps,
+				cap,
+			)
+
+
+		delete(
+			m.running,
+			name,
+		)
+
+
+		delete(
+			m.cameras,
+			name,
+		)
+
+	}
+
+
+
+	workers :=
+		make([]*sync.WaitGroup,0)
+
+
+	for _,wg :=
+		range m.workers {
+
+		workers =
+			append(
+				workers,
+				wg,
+			)
+
+	}
+
+
+	m.workers =
+		make(map[string]*sync.WaitGroup)
+
+
+
+	frames :=
+		make([]gocv.Mat,0)
+
+
+
+	for name,frame :=
+		range m.lastFrames {
+
+
+		frames =
+			append(
+				frames,
+				frame,
+			)
+
+
+		delete(
+			m.lastFrames,
+			name,
+		)
+
+	}
+
+
+
+	m.mu.Unlock()
+
+
+
+
+	for _,cap :=
+		range caps {
+
 		cap.Close()
-		delete(m.cameras, name)
+
 	}
 
-	for name, frame := range m.lastFrames {
+
+
+	for _,wg :=
+		range workers {
+
+		wg.Wait()
+
+	}
+
+
+
+	for _,frame :=
+		range frames {
+
 		frame.Close()
-		delete(m.lastFrames, name)
+
 	}
 
-	m.running = make(map[string]bool)
 }
 
-// InjectFrame injects a gocv.Mat into the camera manager for testing purposes.
-func (m *CameraManager) InjectFrame(cameraName string, mat gocv.Mat) {
+
+
+
+
+
+
+func (m *CameraManager) InjectFrame(
+	cameraName string,
+	mat gocv.Mat,
+){
+
 	m.mu.Lock()
+
 	defer m.mu.Unlock()
 
-	clone := mat.Clone()
 
-	if old, ok := m.lastFrames[cameraName]; ok {
+
+	clone :=
+		mat.Clone()
+
+
+
+	if old,ok :=
+		m.lastFrames[cameraName];
+		ok {
+
 		old.Close()
+
 	}
 
-	m.lastFrames[cameraName] = clone
+
+
+	m.lastFrames[cameraName] =
+		clone
 }

@@ -178,62 +178,182 @@ JSON Response
 
 ### 2026-07-03
 
-- 完成 YOLOv8 ONNX 推論核心（CGO + ONNX Runtime）
-- 建立完整 inference pipeline（preprocess → inference → postprocess）
-- 實作 HTTP API `/infer` 支援單張 JPEG 推論
-- 完成 NMS（Non-Maximum Suppression）與 detection decode
-- 建立 camera manager（frame capture loop）
-- 建立 store 架構（pipeline registry + result cache）
-- 實作 polygon / class rule filtering logic（尚未接入 pipeline）
-- 系統目前處於：
-  > 單張圖片推論可用，但尚未進入 streaming pipeline 架構
+#### 完成項目
 
-### 2026-07-13 
+- 完成 YOLOv8 ONNX 推論核心（CGO + ONNX Runtime）
+- 建立完整 inference pipeline：
+  - preprocess
+  - inference
+  - postprocess
+
+- 實作 HTTP API `/infer` 支援單張 JPEG 推論
+- 完成 YOLOv8 detection decode 與 NMS（Non-Maximum Suppression）
+- 建立 camera manager（frame capture loop）
+- 建立 store 架構：
+  - pipeline registry
+  - inference result cache
+
+- 實作 polygon / class rule filtering logic（尚未接入 pipeline）
+
+#### 系統狀態
+
+目前：
+
+> 單張圖片推論可用，但尚未進入 streaming pipeline 架構
+
+
+---
+
+### 2026-07-13
 
 #### 完成項目
 
-- 新增 `internal/app` 層，拆分原本 `cmd/server/main.go` 的初始化責任：
-  - Runtime 建立
+- 新增 `internal/app` 層：
+  - Runtime 初始化
   - Model 載入
   - Camera 初始化
-  - Pipeline 註冊與綁定
+  - Pipeline 註冊
 
-- 修改 `configs/config.yaml`：
-  - 支援 camera 設定列表
-  - 由設定檔管理 camera source、model binding、stream interval
+- 修改 config 架構：
+  - 支援 camera 設定
+  - 支援 model binding
+  - 支援 stream interval
 
 - 修正 ONNX Runtime 啟動問題：
-  - 啟用 `onnxruntime` build tag
-  - 確認新版 ONNX Runtime 1.26 DLL 正確載入
-  - 排除系統 PATH 中舊版 ONNX Runtime 1.17/1.16 DLL 衝突
+  - 啟用 onnxruntime build tag
+  - 更新 ONNX Runtime 1.26 DLL
+  - 排除舊版本 DLL 衝突
 
-- 完成實際服務驗證：
-  - `/health` 正常回應
-  - `/api/camera/check?name=cam0` 回傳 camera alive
-  - `/api/infer_od/live_result?name=cam0` 成功取得 YOLO 推論結果
+- 完成 streaming inference 流程：
+```
+Camera
+↓
+Stream Worker
+↓
+YOLO Pipeline
+↓
+ONNX Runtime
+↓
+Store
+↓
+API Response
+```
+
+- 驗證：
+  - `/health`
+  - `/api/camera/check`
+  - `/api/infer_od/live_result`
 
 #### 測試結果
 
-已確認流程：
+確認：
 
-Camera  
-→ Stream Worker  
-→ YOLO Pipeline  
-→ ONNX Runtime  
-→ Store  
-→ API Response
+- Camera frame capture 正常
+- YOLOv8 streaming inference 正常
+- Result API 可取得 detection
+
+#### 尚未完成
+
+- Camera 與 inference lifecycle 尚未完全分離
+- API handler 尚未模組化
+- 尚未完成 integration test
+
+
+#### 下一步
+
+1. 分離 camera open 與 inference start
+2. 重構 server handler 架構
+3. 完成 camera / inference API integration test
+
+
+---
+
+### 2026-07-16
+
+#### 完成項目
+
+- 移除 App 啟動時自動開啟 camera / stream
+- Camera lifecycle 改由 API 控制：
+```
+camera/open
+camera/close
+camera/check
+camera/frame
+camera/live
+```
+- 完成 Server handler 模組化：
+```
+internal/server
+
+server.go
+routes.go
+health_handler.go
+camera_handler.go
+inference_handler.go
+od_handler.go
+```
+- 分離 Camera 與 Inference lifecycle：
+```
+Camera
+
+↓
+
+Inference Stream
+
+↓
+
+Result Store
+
+↓
+
+API
+```
+
+- 完成 OD API：
+  - inference start / stop
+  - live result query
+  - inference stream
+
+- 補充 Class Name Mapping：
+  - ClassID → ClassName
+
+- 新增 server integration test：
+  - inference start
+  - result storage
+  - API response
+
+- 通過 race test：
+```
+go test -race ./...
+```
+
+#### 測試結果
+
+確認流程：
+```
+Camera API
+↓
+Stream Manager
+↓
+YOLO Pipeline
+↓
+PipelineStore
+↓
+Inference API
+```
 
 可正常運作。
 
 #### 尚未完成
 
-- `/api/camera/frame` 與 `/api/camera/live` 尚未確認影像輸出
-- `/api/start_live_infer_od` PowerShell curl 測試格式需修正
-- 尚未進行真實長時間 camera + ONNX 壓力測試
+- inference API 仍以 OD 為主要設計
+- Pipeline 架構尚未抽象化
+- 尚未支援 CLS / SEG / Pose 等任務
+
 
 #### 下一步
 
-1. 修正並驗證 camera frame/live MJPEG API
-2. 完成 API integration test（包含 camera、stream、inference endpoint）
-3. 進行真實 camera + YOLO ONNX 長時間運行測試
-4. 整理 deployment 流程（DLL、model、config、binary 打包）
+1. 泛化 inference task 架構，支援 OD / CLS / SEG
+2. 建立 task / pipeline registry
+3. 抽象化 inference result structure
+4. 完成 Docker 化部署流程
